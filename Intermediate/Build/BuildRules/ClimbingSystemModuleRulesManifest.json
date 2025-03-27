@@ -1,0 +1,8 @@
+{
+	"SourceFiles": [
+		"C:\\BootCamp\\Udemy\\ClimbingSystem\\Source\\ClimbingSystem\\ClimbingSystem.Build.cs",
+		"C:\\BootCamp\\Udemy\\ClimbingSystem\\Source\\ClimbingSystem.Target.cs",
+		"C:\\BootCamp\\Udemy\\ClimbingSystem\\Source\\ClimbingSystemEditor.Target.cs"
+	],
+	"EngineVersion": "5.4.4"
+}
