@@ -23,8 +23,7 @@ void UCustomMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 {
 	Super::TickComponent(DeltaTime,TickType, ThisTickFunction);
 
-	/*TraceClimbableSurfaces();
-	TraceFromEyeHeight(100.f);*/
+	//CanClimbDownLedge();
 }
 
 void UCustomMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
@@ -179,6 +178,10 @@ void UCustomMovementComponent::ToggleClimbing(bool bEnableClimb)
 			//Enter the climb state
 			PlayClimbMontage(IdleToClimbMontage);
 		}
+		else if (CanClimbDownLedge())
+		{
+			PlayClimbMontage(ClimbDownLedgeMontage);
+		}
 	}
 	else
 	{
@@ -194,6 +197,32 @@ bool UCustomMovementComponent::CanStartClimbing()
 	if(!TraceFromEyeHeight(100.f).bBlockingHit) return false;
 
 	return true;
+}
+
+bool UCustomMovementComponent::CanClimbDownLedge()
+{
+	if (IsFalling()) return false;
+
+	const FVector ComponentLocation = UpdatedComponent->GetComponentLocation();
+	const FVector ComponentForward = UpdatedComponent->GetForwardVector();
+	const FVector DownVector = -UpdatedComponent->GetUpVector();
+
+	const FVector WalkableSurfaceTraceStart = ComponentLocation + ComponentForward * ClimbDownWalkableSurfaceTraceOffset;
+	const FVector WalkableSurfaceTraceEnd = WalkableSurfaceTraceStart + DownVector * 100.f;
+
+	FHitResult WalkableSurfaceHit = DoLineTraceSingleByObject(WalkableSurfaceTraceStart, WalkableSurfaceTraceEnd);
+
+	const FVector LedgeTraceStart = WalkableSurfaceHit.TraceStart + ComponentForward * ClimbDownLedgeTraceOffset;
+	const FVector LedgeTraceEnd = LedgeTraceStart + DownVector * 200.f;
+
+	FHitResult LedgeTraceHit = DoLineTraceSingleByObject(LedgeTraceStart, LedgeTraceEnd);
+
+	if (WalkableSurfaceHit.bBlockingHit && !LedgeTraceHit.bBlockingHit)
+	{
+		return true;
+	}
+
+	return false;
 }
 
 void UCustomMovementComponent::StartClimbing()
@@ -411,11 +440,13 @@ void UCustomMovementComponent::PlayClimbMontage(UAnimMontage* MontageToPlay)
 
 void UCustomMovementComponent::OnClimbMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	if(Montage == IdleToClimbMontage)
+	if (Montage == IdleToClimbMontage || Montage == ClimbDownLedgeMontage)
 	{
 		StartClimbing();
+		StopMovementImmediately();
 	}
-	else
+
+	if (Montage == ClimbToTopMontage)
 	{
 		SetMovementMode(MOVE_Walking);
 	}
