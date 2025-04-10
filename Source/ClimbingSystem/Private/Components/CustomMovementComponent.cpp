@@ -3,6 +3,8 @@
 #include "ClimbingSystem/ClimbingSystemCharacter.h"
 #include "Components/CapsuleComponent.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "ClimbingSystem/ClimbingSystemCharacter.h"
+#include "MotionWarpingComponent.h"
 
 #include "ClimbingSystem/DebugHelper.h"
 
@@ -17,6 +19,8 @@ void UCustomMovementComponent::BeginPlay()
 		OwningPlayerAnimInstance->OnMontageEnded.AddDynamic(this,&UCustomMovementComponent::OnClimbMontageEnded);
 		OwningPlayerAnimInstance->OnMontageBlendingOut.AddDynamic(this,&UCustomMovementComponent::OnClimbMontageEnded);
 	}
+
+	OwningPlayerCharacter = Cast<AClimbingSystemCharacter>(CharacterOwner);
 }
 
 void UCustomMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
@@ -32,6 +36,8 @@ void UCustomMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovem
 	{
 		bOrientRotationToMovement = false;
 		CharacterOwner->GetCapsuleComponent()->SetCapsuleHalfHeight(48.f); // 절반으로 
+
+		OnEnterClimbStateDelegate.ExecuteIfBound();
 	}
 
 	// 클라이밍 상태가 끝나면 
@@ -45,6 +51,8 @@ void UCustomMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovem
 		UpdatedComponent->SetRelativeRotation(CleanStandRotation);
  
 		StopMovementImmediately();
+
+		OnExitClimbStateDelegate.ExecuteIfBound();
 	}
  
 	Super::OnMovementModeChanged(PreviousMovementMode,PreviousCustomMode);
@@ -63,13 +71,13 @@ void UCustomMovementComponent::PhysCustom(float deltaTime, int32 Iterations)
 float UCustomMovementComponent::GetMaxSpeed() const
 {
 	if(IsClimbing())
-     	{
-     		return MaxClimbSpeed;
-     	}
-     	else
-     	{
-     		return Super::GetMaxSpeed();
-     	}
+	{
+		return MaxClimbSpeed;
+	}
+	else
+	{
+		return Super::GetMaxSpeed();
+	}
 }
 
 float UCustomMovementComponent::GetMaxAcceleration() const
@@ -181,6 +189,10 @@ void UCustomMovementComponent::ToggleClimbing(bool bEnableClimb)
 		else if (CanClimbDownLedge())
 		{
 			PlayClimbMontage(ClimbDownLedgeMontage);
+		}
+		else
+		{
+			TryStartVaulting();
 		}
 	}
 	else
@@ -401,6 +413,63 @@ bool UCustomMovementComponent::CheckHasReachedLedge()
 	return false;
 }
 
+void UCustomMovementComponent::TryStartVaulting()
+{
+	FVector VaultStartPosition;
+	FVector VaultLandPosition;
+
+	if (CanStartVaulting(VaultStartPosition, VaultLandPosition))
+	{
+		SetMotionWarpTarget(FName("VaultStartPoint"), VaultStartPosition);
+		SetMotionWarpTarget(FName("VaultEndPoint"), VaultLandPosition);
+
+		StartClimbing();
+		PlayClimbMontage(VaultMontage);
+	}
+}
+
+bool UCustomMovementComponent::CanStartVaulting(FVector& OutVaultStartPosition, FVector& OutVaultLandPosition)
+{
+	if (IsFalling()) return false;
+
+	OutVaultStartPosition = FVector::ZeroVector;
+	OutVaultLandPosition = FVector::ZeroVector;
+
+	const FVector ComponentLocation = UpdatedComponent->GetComponentLocation();
+	const FVector ComponentForward = UpdatedComponent->GetForwardVector();
+	const FVector UpVector = UpdatedComponent->GetUpVector();
+	const FVector DownVector = -UpdatedComponent->GetUpVector();
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		const FVector Start = ComponentLocation + UpVector * 100.f +
+			ComponentForward * 100.f * (i + 1);
+
+		const FVector End = Start + DownVector * 100.f * (i + 1);
+
+		FHitResult VaultTraceHit = DoLineTraceSingleByObject(Start, End);
+
+		if (i == 0 && VaultTraceHit.bBlockingHit)
+		{
+			OutVaultStartPosition = VaultTraceHit.ImpactPoint;
+		}
+
+		if (i == 3 && VaultTraceHit.bBlockingHit)
+		{
+			OutVaultLandPosition = VaultTraceHit.ImpactPoint;
+		}
+	}
+
+	if (OutVaultStartPosition != FVector::ZeroVector && OutVaultLandPosition != FVector::ZeroVector)
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+
 bool UCustomMovementComponent::IsClimbing() const
 {	
 	return MovementMode == MOVE_Custom && CustomMovementMode == ECustomMovementMode::MOVE_Climb;
@@ -446,10 +515,20 @@ void UCustomMovementComponent::OnClimbMontageEnded(UAnimMontage* Montage, bool b
 		StopMovementImmediately();
 	}
 
-	if (Montage == ClimbToTopMontage)
+	if (Montage == ClimbToTopMontage || Montage == VaultMontage)
 	{
 		SetMovementMode(MOVE_Walking);
 	}
+}
+
+void UCustomMovementComponent::SetMotionWarpTarget(const FName& InWarpTargetName, const FVector& InTargetPosition)
+{
+	if (!OwningPlayerCharacter) return;
+
+	OwningPlayerCharacter->GetMotionWarpingComponent()->AddOrUpdateWarpTargetFromLocation(
+		InWarpTargetName,
+		InTargetPosition
+	);
 }
 
 FVector UCustomMovementComponent::GetUnrotatedClimbVelocity() const
